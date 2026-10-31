@@ -26,6 +26,7 @@ class StartReq(BaseModel):
     title: str = ""
     start_at: str | float | None = None  # "12:34" 또는 초
     stop_on_end: bool = True
+    live: bool = False  # 폰에서 지금 재생 중인 위치 (PC 준비 시간만큼 보정)
 
 
 class SeekReq(BaseModel):
@@ -141,7 +142,7 @@ def create_app(rec: Recorder, *, background: bool = True, pairing: Pairing | Non
 
     @app.post("/api/record/start", dependencies=dep)
     def start(req: StartReq):
-        s = rec.start(req.url.strip(), req.title.strip(), parse_time(req.start_at), req.stop_on_end)
+        s = rec.start(req.url.strip(), req.title.strip(), parse_time(req.start_at), req.stop_on_end, req.live)
         return asdict(s)
 
     @app.post("/api/record/stop", dependencies=dep)

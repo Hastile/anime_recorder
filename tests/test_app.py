@@ -201,3 +201,18 @@ def test_discovery_responds(tmp_path):
     d = json.loads(s.recvfrom(4096)[0])
     stop.set()
     assert d["name"] == "집PC" and d["id"] == info.id
+
+
+def test_live_start_compensates_for_setup_time(env, monkeypatch):
+    rec, obs, player, client, _ = env
+    import recorder.core as core
+    t = [100.0]
+    monkeypatch.setattr(core.time, "monotonic", lambda: t[0])
+    orig_open = player.open
+
+    def slow_open(url):
+        orig_open(url)
+        t[0] += 6.0  # PC에서 페이지를 여는 데 6초
+    player.open = slow_open
+    client.post("/api/record/start", json={"url": "https://ex.com", "start_at": 300, "live": True})
+    assert player.time == 306 and player.calls[-1] == ("play", None)

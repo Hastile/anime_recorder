@@ -55,5 +55,29 @@
                 android:value="Remote control notification for a PC screen recorder" />
         </service>
 
+        <!-- 브라우저 주소 읽기 + 플로팅 녹화 버튼 -->
+        <service
+            android:name=".LinkService"
+            android:exported="true"
+            android:label="@string/link_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/link_service" />
+        </service>
+
+        <!-- 브라우저 재생 위치/일시정지 읽기 (미디어 세션 접근용) -->
+        <service
+            android:name=".MediaWatcher"
+            android:exported="true"
+            android:label="@string/media_watcher_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

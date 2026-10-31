@@ -148,7 +148,9 @@ class Recorder:
 
     # ---- 녹화 -------------------------------------------------------
     def start(self, url: str = "", title: str = "", start_at: float | None = None,
-              stop_on_end: bool = True) -> Session:
+              stop_on_end: bool = True, live: bool = False) -> Session:
+        """live: 폰에서 지금 재생 중인 위치를 보낸 경우. PC 준비에 걸린 시간만큼 앞으로 맞춘다."""
+        requested = time.monotonic()
         with self._lock:
             if self.starting or self.obs.status().recording:
                 raise RecorderError("이미 녹화 중입니다")
@@ -167,6 +169,9 @@ class Recorder:
             if playing:
                 # 녹화가 시작된 다음 재생해야 앞부분이 잘리지 않는다
                 try:
+                    if live and start_at is not None:
+                        # 폰은 그동안 계속 재생됐으므로 그만큼 앞으로
+                        self.player.seek(to=start_at + (time.monotonic() - requested))
                     self.player.play()
                 except Exception as e:  # noqa: BLE001
                     self.event(f"재생 시작 실패: {e}", "error")
