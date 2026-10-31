@@ -39,6 +39,7 @@ def main() -> None:
     print(" Anime Recorder 실행 중" + (" (데모 모드)" if args.demo else ""))
     print(f"  같은 와이파이:  http://{_lan_ip()}:{cfg.server.port}")
     print(f"  접속 토큰:      {cfg.server.token}")
+    print("  폰 앱: PC 목록에서 이 PC를 고르면 여기에 PIN이 뜹니다.")
     print("  밖에서 쓰려면 README의 Tailscale 설정을 참고하세요.")
     print("=" * 56 + "\n")
     uvicorn.run(app, host=cfg.server.host, port=cfg.server.port, log_level="warning")

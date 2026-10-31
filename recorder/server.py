@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import threading
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from .core import Recorder, RecorderError
 from .obs import ObsError
+from .pairing import HostInfo, Pairing, serve_discovery
 
 STATIC = Path(__file__).parent / "static"
 
@@ -45,6 +47,15 @@ class JobReq(BaseModel):
     enabled: bool = True
 
 
+class PairStartReq(BaseModel):
+    device: str = ""
+
+
+class PairConfirmReq(BaseModel):
+    pair_id: str
+    pin: str
+
+
 class JobPatch(BaseModel):
     name: str | None = None
     time: str | None = None
@@ -55,13 +66,36 @@ class JobPatch(BaseModel):
     enabled: bool | None = None
 
 
-def create_app(rec: Recorder, *, background: bool = True) -> FastAPI:
+def show_pin(device: str, pin: str) -> None:
+    """PC 화면에 페어링 PIN을 크게 보여준다."""
+    print("\n" + "=" * 40 + f"\n  페어링 요청: {device}\n  PIN:  {' '.join(pin)}\n" + "=" * 40 + "\n", flush=True)
+    import sys
+
+    if sys.platform == "win32":
+        import ctypes
+
+        text = f"{device}에서 연결을 요청했습니다.\n\n휴대폰에 이 PIN을 입력하세요:\n\n        {pin}"
+        # MB_OK | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND
+        threading.Thread(target=ctypes.windll.user32.MessageBoxW,
+                         args=(None, text, "Anime Recorder 페어링", 0x40 | 0x40000 | 0x10000),
+                         daemon=True).start()
+
+
+def create_app(rec: Recorder, *, background: bool = True, pairing: Pairing | None = None) -> FastAPI:
     stop_event = threading.Event()
+    cfg = rec.cfg
+    info = HostInfo(cfg.data_dir, cfg.server.name, cfg.server.port)
+    if pairing is None:
+        pairing = Pairing(cfg.data_dir)
+        pairing.on_pin = show_pin
+    last_pair_start = [0.0]
 
     @asynccontextmanager
     async def lifespan(app):
         if background:
             threading.Thread(target=rec.run_loop, args=(stop_event,), daemon=True).start()
+            if cfg.server.discovery:
+                threading.Thread(target=serve_discovery, args=(info, stop_event), daemon=True).start()
         yield
         stop_event.set()
 
@@ -71,7 +105,7 @@ def create_app(rec: Recorder, *, background: bool = True) -> FastAPI:
     def auth(request: Request):
         header = request.headers.get("authorization", "")
         given = header[7:] if header.lower().startswith("bearer ") else ""
-        if not secrets.compare_digest(given.encode(), token.encode()):
+        if not (secrets.compare_digest(given.encode(), token.encode()) or pairing.verify(given)):
             raise HTTPException(401, "토큰이 올바르지 않습니다")
 
     @app.exception_handler(RecorderError)
@@ -82,11 +116,44 @@ def create_app(rec: Recorder, *, background: bool = True) -> FastAPI:
     async def _val_err(_, e):
         return JSONResponse({"detail": str(e)}, status_code=400)
 
+    @app.exception_handler(PermissionError)
+    async def _perm_err(_, e):
+        return JSONResponse({"detail": str(e)}, status_code=403)
+
     @app.exception_handler(KeyError)
     async def _key_err(_, e):
         return JSONResponse({"detail": "찾을 수 없습니다"}, status_code=404)
 
     dep = [Depends(auth)]
+
+    # ---- 앱 연결 (토큰 없이 호출) ----------------------------------------
+    @app.get("/api/info")
+    def host_info():
+        return info.as_dict()
+
+    @app.post("/api/pair/start")
+    def pair_start(req: PairStartReq):
+        now = time.monotonic()
+        if now - last_pair_start[0] < 3:
+            raise HTTPException(429, "잠시 후 다시 시도하세요")
+        last_pair_start[0] = now
+        rec.event(f"페어링 요청: {req.device or '휴대폰'}")
+        return {"pair_id": pairing.start(req.device)}
+
+    @app.post("/api/pair/confirm")
+    def pair_confirm(req: PairConfirmReq):
+        tok = pairing.confirm(req.pair_id, req.pin)
+        rec.event("새 기기가 연결되었습니다")
+        return {"token": tok, "host": info.as_dict()}
+
+    @app.get("/api/devices", dependencies=dep)
+    def devices():
+        return pairing.list()
+
+    @app.delete("/api/devices/{device_id}", dependencies=dep)
+    def remove_device(device_id: str):
+        pairing.remove(device_id)
+        return {"ok": True}
 
     @app.get("/api/status", dependencies=dep)
     def status():

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 집 PC(LAN / Tailscale)는 http로 접속하므로 평문 통신 허용. Tailscale 구간은 WireGuard로 암호화됨 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

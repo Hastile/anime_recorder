@@ -13,6 +13,10 @@ class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8765
     token: str = ""
+    # 앱 PC 목록에 보일 이름 (비우면 컴퓨터 이름)
+    name: str = ""
+    # 같은 와이파이에서 앱이 PC를 자동으로 찾게 함 (UDP 8766)
+    discovery: bool = True
 
 
 @dataclass

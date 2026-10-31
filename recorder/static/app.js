@@ -8,6 +8,10 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* 사생활 보호 모드 */ } },
 };
 let token = store.get("token");
+// 안드로이드 앱이 #token=... 으로 토큰을 넘겨준다
+const hashToken = new URLSearchParams(location.hash.slice(1)).get("token");
+if (hashToken) { token = hashToken; store.set("token", token); history.replaceState(null, "", location.pathname); }
+const nativeApp = window.AnimeRecorderApp; // 안드로이드 앱 안에서 실행 중이면 존재
 let state = null;
 let tab = "rec";
 let autoStopMin = "";
@@ -201,7 +205,10 @@ function renderIsolation(s) {
 
 async function refresh() {
   if (!token) return askToken();
-  try { state = await api("/api/status"); renderStatus(); }
+  try {
+    state = await api("/api/status"); renderStatus();
+    try { nativeApp?.onStatus(JSON.stringify({ recording: state.obs.recording })); } catch { }
+  }
   catch (e) { $("#conn").textContent = "PC 연결 안 됨"; $("#conn").className = "pill bad"; }
 }
 

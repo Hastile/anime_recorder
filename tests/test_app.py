@@ -144,3 +144,60 @@ def test_marker_window():
     assert Marker(id="a", kind="point", t=3).window(10, 5, 60) == (0, 8)
     assert Marker(id="a", kind="point", t=58).window(10, 5, 60) == (48, 60)
     assert Marker(id="a", kind="range", start=5, end=9).window(10, 5, 60) == (5, 9)
+
+
+def test_pairing_flow(env):
+    rec, _, client, _, tmp = env
+    from recorder.pairing import Pairing
+    anon = TestClient(client.app)
+    info = anon.get("/api/info").json()
+    assert info["app"] == "anime-recorder" and info["id"]
+
+    # 앱 생성 시 만든 Pairing의 PIN을 가로채기 위해 새 앱을 만든다
+    pins = []
+    pairing = Pairing(rec.cfg.data_dir)
+    pairing.on_pin = lambda d, p: pins.append(p)
+    app_client = TestClient(create_app(rec, background=False, pairing=pairing))
+    pid = app_client.post("/api/pair/start", json={"device": "Galaxy"}).json()["pair_id"]
+    bad = "0000" if pins[0] != "0000" else "1111"
+    r = app_client.post("/api/pair/confirm", json={"pair_id": pid, "pin": bad})
+    assert r.status_code == 403 and "남음" in r.json()["detail"]
+    r = app_client.post("/api/pair/confirm", json={"pair_id": pid, "pin": pins[0]})
+    assert r.status_code == 200
+    tok = r.json()["token"]
+    assert app_client.get("/api/status", headers={"Authorization": f"Bearer {tok}"}).status_code == 200
+    # 한 번 쓴 요청은 재사용 불가
+    assert app_client.post("/api/pair/confirm", json={"pair_id": pid, "pin": pins[0]}).status_code == 403
+    devs = app_client.get("/api/devices", headers={"Authorization": f"Bearer {tok}"}).json()
+    assert devs[0]["name"] == "Galaxy" and "hash" not in devs[0]
+
+
+def test_pairing_lockout(tmp_path):
+    from recorder.pairing import Pairing
+    p = Pairing(tmp_path)
+    pins = []
+    p.on_pin = lambda d, pin: pins.append(pin)
+    pid = p.start("x")
+    wrong = "0000" if pins[0] != "0000" else "1111"
+    for _ in range(5):
+        with pytest.raises(PermissionError):
+            p.confirm(pid, wrong)
+    with pytest.raises(PermissionError, match="만료"):
+        p.confirm(pid, pins[0])
+
+
+def test_discovery_responds(tmp_path):
+    import json, socket, threading
+    from recorder.pairing import DISCOVERY_MAGIC, HostInfo, serve_discovery
+    info = HostInfo(tmp_path, "집PC", 8765)
+    stop = threading.Event()
+    port = 18766
+    t = threading.Thread(target=serve_discovery, args=(info, stop, port), daemon=True)
+    t.start()
+    import time; time.sleep(0.3)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2)
+    s.sendto(DISCOVERY_MAGIC, ("127.0.0.1", port))
+    data, _ = s.recvfrom(4096)
+    stop.set()
+    d = json.loads(data)
+    assert d["name"] == "집PC" and d["port"] == 8765 and d["id"] == info.id
