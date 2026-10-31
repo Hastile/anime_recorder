@@ -1,5 +1,4 @@
 <resources>
     <string name="app_name">Anime Recorder</string>
-    <string name="tile_label">★ 장면 표시</string>
     <string name="channel_name">녹화 리모컨</string>
 </resources>

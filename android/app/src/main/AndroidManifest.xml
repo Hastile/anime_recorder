@@ -26,6 +26,20 @@
             </intent-filter>
         </activity>
 
+        <!-- 폰 브라우저의 "공유" 메뉴에 Anime Recorder가 뜨게 함 -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:label="PC에서 녹화"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.AnimeRecorder.Translucent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".ControlActivity"
             android:exported="false"
@@ -41,15 +55,5 @@
                 android:value="Remote control notification for a PC screen recorder" />
         </service>
 
-        <service
-            android:name=".MarkTileService"
-            android:exported="true"
-            android:icon="@drawable/ic_star"
-            android:label="@string/tile_label"
-            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter>
-                <action android:name="android.service.quicksettings.action.QS_TILE" />
-            </intent-filter>
-        </service>
     </application>
 </manifest>

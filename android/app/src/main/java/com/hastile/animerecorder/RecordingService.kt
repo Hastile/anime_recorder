@@ -27,14 +27,13 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
- * 녹화 중 알림 리모컨. 폰으로 다른 앱에서 영상을 보면서도
- * 알림/잠금화면의 버튼으로 장면 표시, 구간, 정지를 할 수 있다.
+ * 녹화 중 알림 리모컨. 폰으로 다른 앱을 쓰면서도
+ * 알림/잠금화면에서 녹화 상태를 보고 일시정지, 정지할 수 있다.
  */
 class RecordingService : Service() {
     companion object {
         private const val ACTION_WATCH = "watch"
-        private const val ACTION_MARK = "mark"
-        private const val ACTION_RANGE = "range"
+        private const val ACTION_PAUSE = "pause"
         private const val ACTION_STOP = "stop"
         private const val EXTRA_HOST = "host"
         private const val CHANNEL = "recording"
@@ -78,12 +77,12 @@ class RecordingService : Service() {
             return START_NOT_STICKY
         }
         when (intent?.action) {
-            ACTION_MARK -> act(JSONObject().put("kind", "point"))
-            ACTION_RANGE -> act(JSONObject().put("kind", if (openRange()) "out" else "in"))
+            ACTION_PAUSE -> act(if (isPaused()) "/api/record/resume" else "/api/record/pause",
+                if (isPaused()) "다시 재생합니다" else "일시정지했습니다")
             ACTION_STOP -> {
                 if (SystemClock.elapsedRealtime() < stopArmedUntil) {
                     stopArmedUntil = 0
-                    act(null, stop = true)
+                    act("/api/record/stop", "녹화를 저장했습니다")
                 } else {
                     // 실수로 누르는 것 방지: 5초 안에 한 번 더 눌러야 정지
                     stopArmedUntil = SystemClock.elapsedRealtime() + 5000
@@ -159,24 +158,13 @@ class RecordingService : Service() {
     }
 
     // ---- 버튼 동작 ----------------------------------------------------------
-    private fun act(body: JSONObject?, stop: Boolean = false) {
+    private fun act(path: String, okMsg: String) {
         scope.launch {
             val host = HostStore(this@RecordingService).get(hostId) ?: return@launch
             val b = currentBase(host) ?: return@launch showFlash("PC에 연결할 수 없습니다")
             try {
-                if (stop) {
-                    Api.post(b, "/api/record/stop", host.token)
-                    showFlash("녹화를 저장했습니다")
-                } else {
-                    val r = JSONObject(Api.post(b, "/api/mark", host.token, body!!))
-                    showFlash(
-                        when (body.optString("kind")) {
-                            "in" -> "구간 시작 ${fmtTime(r.optDouble("start").toLong())}"
-                            "out" -> "구간 저장 ~${fmtTime(r.optDouble("end").toLong())}"
-                            else -> "★ ${fmtTime(r.optDouble("t").toLong())} 표시했습니다"
-                        },
-                    )
-                }
+                Api.post(b, path, host.token)
+                showFlash(okMsg)
                 vibrate()
                 poll()
             } catch (e: ApiException) {
@@ -204,14 +192,7 @@ class RecordingService : Service() {
         runCatching { v.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE)) }
     }
 
-    private fun openRange(): Boolean {
-        val markers = status?.optJSONObject("session")?.optJSONArray("markers") ?: return false
-        for (i in 0 until markers.length()) {
-            val m = markers.getJSONObject(i)
-            if (m.optString("kind") == "range" && m.isNull("end")) return true
-        }
-        return false
-    }
+    private fun isPaused(): Boolean = status?.optJSONObject("obs")?.optBoolean("paused") == true
 
     // ---- 알림 ---------------------------------------------------------------
     private fun ensureChannel() {
@@ -242,7 +223,7 @@ class RecordingService : Service() {
         val paused = obs?.optBoolean("paused") == true
         val durationMs = obs?.optLong("duration_ms") ?: 0L
         val session = st?.optJSONObject("session")
-        val marks = session?.optJSONArray("markers")?.length() ?: 0
+        val player = st?.optJSONObject("player")
         val hostName = HostStore(this).get(hostId)?.name ?: "PC"
 
         val title = when {
@@ -254,10 +235,11 @@ class RecordingService : Service() {
         }
         val parts = mutableListOf<String>()
         session?.optString("title")?.takeIf { it.isNotBlank() }?.let { parts += it }
-        if (marks > 0) parts += "표시 ${marks}개"
-        if (st != null && !st.isNull("auto_stop_in")) parts += "${fmtTime(st.optLong("auto_stop_in"))} 후 자동 정지"
+        if (player != null && player.optBoolean("found") && !player.isNull("duration")) {
+            parts += "${fmtTime(player.optDouble("time").toLong())} / ${fmtTime(player.optDouble("duration").toLong())}"
+        }
         val showFlash = flash != null && SystemClock.elapsedRealtime() < flashUntil
-        val text = if (showFlash) flash!! else parts.joinToString(" · ").ifEmpty { "버튼으로 장면을 표시하세요" }
+        val text = if (showFlash) flash!! else parts.joinToString(" · ").ifEmpty { "PC에서 녹화 중" }
 
         val open = PendingIntent.getActivity(
             this, 0,
@@ -285,9 +267,8 @@ class RecordingService : Service() {
         }
         if (recording) {
             val armed = SystemClock.elapsedRealtime() < stopArmedUntil
-            b.addAction(0, "★ 표시", pending(ACTION_MARK, 1))
-            b.addAction(0, if (openRange()) "구간 끝" else "구간 시작", pending(ACTION_RANGE, 2))
-            b.addAction(0, if (armed) "정지 확인" else "■ 정지", pending(ACTION_STOP, 3))
+            b.addAction(0, if (paused) "▶ 다시 재생" else "⏸ 일시정지", pending(ACTION_PAUSE, 1))
+            b.addAction(0, if (armed) "정지 확인" else "■ 정지하고 저장", pending(ACTION_STOP, 3))
         }
         return b.build()
     }

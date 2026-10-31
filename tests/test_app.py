@@ -1,16 +1,14 @@
-import subprocess
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from recorder.clips import probe_duration
 from recorder.config import Config
-from recorder.core import Recorder
+from recorder.core import Recorder, parse_time, safe_filename
 from recorder.obs import FakeObs
-from recorder.scheduler import Job
 from recorder.server import create_app
+
+from recorder.demo import FakePlayer
 
 
 class Clock:
@@ -26,150 +24,154 @@ def env(tmp_path):
     cfg = Config(data_dir=tmp_path / "data")
     cfg.data_dir.mkdir()
     cfg.server.token = "secret"
-    cfg.browser.wait_seconds = 0
     obs = FakeObs(record_dir=tmp_path)
     obs.clock = Clock()
-    opened = []
-    rec = Recorder(cfg, obs, opener=lambda c, u: opened.append(u), sleep=lambda s: None)
+    player = FakePlayer()
+    rec = Recorder(cfg, obs, player=player, sleep=lambda s: None)
     client = TestClient(create_app(rec, background=False))
     client.headers["Authorization"] = "Bearer secret"
-    return rec, obs, client, opened, tmp_path
+    return rec, obs, player, client, tmp_path
 
 
-def make_video(path: Path, seconds: int = 30):
-    subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"testsrc=size=320x180:rate=30:duration={seconds}",
-         "-f", "lavfi", "-i", f"sine=duration={seconds}", "-g", "30", "-c:v", "libx264", "-c:a", "aac", str(path)],
-        check=True,
-    )
+def wait_rename(rec, sid):
+    import time
+    for _ in range(50):
+        p = rec.sessions.get(sid).output_path
+        if p and not Path(p).name.startswith("raw"):
+            return p
+        time.sleep(0.05)
+    return rec.sessions.get(sid).output_path
 
 
 def test_requires_token(env):
-    _, _, client, _, _ = env
+    *_, client, _ = env
     assert client.get("/api/status", headers={"Authorization": "Bearer nope"}).status_code == 401
     assert client.get("/api/status").status_code == 200
-    assert client.get("/").status_code == 200  # 앱 화면은 토큰 없이 열림
+    assert client.get("/").status_code == 200
 
 
-def test_record_mark_stop_and_clip(env):
-    rec, obs, client, opened, tmp = env
-    video = tmp / "ep1.mkv"
-    make_video(video, 30)
-    obs.output_path = str(video)
-    rec.cfg.clips.auto_export = False
+def test_shared_page_recorded_from_position(env):
+    rec, obs, player, client, tmp = env
+    raw = tmp / "raw 2026-10-31.mkv"
+    raw.write_bytes(b"x")
+    obs.output_path = str(raw)
 
-    r = client.post("/api/record/start", json={"url": "https://example.com/ep1", "title": "1화"})
+    r = client.post("/api/record/start", json={"url": "https://ex.com/ep3", "start_at": "12:34"})
     assert r.status_code == 200, r.text
-    assert opened == ["https://example.com/ep1"]
-    assert client.post("/api/record/start", json={}).status_code == 409
+    s = r.json()
+    assert s["title"] == "진격의 거인 3화 - 스트리밍"  # 비우면 페이지 제목
+    assert s["start_at"] == 754
+    # 시작 위치로 맞춰 멈춰 두고, 화면을 채우고, 녹화가 시작된 다음 재생
+    names = [c[0] for c in player.calls]
+    assert names.index("pause") < names.index("fill") < len(names) - 1
+    assert player.calls[-1] == ("play", None) and player.time == 754 and obs.recording
 
-    obs.clock.t += 15
-    assert client.post("/api/mark", json={"kind": "point", "label": "명장면"}).json()["t"] == 15
-    obs.clock.t += 3
-    client.post("/api/mark", json={"kind": "in"})
-    obs.clock.t += 6
-    client.post("/api/mark", json={"kind": "out", "label": "대사"})
-    obs.clock.t += 6
+    st = client.get("/api/status").json()
+    assert st["player"]["time"] == 754 and st["stop_on_end"] is True
 
-    s = client.post("/api/record/stop").json()
-    assert s["output_path"] == str(video) and s["duration"] == 30
-    rec._export(s["id"])
-    s = rec.sessions.get(s["id"])
-    assert s.export_state == "done", s.export_message
-    clips = sorted(Path(m.clip_path) for m in s.markers)
-    assert len(clips) == 2 and all(c.exists() for c in clips)
-    assert "명장면" in s.markers[0].clip_path
-    lengths = [probe_duration(rec.cfg.clips, m.clip_path) for m in s.markers]
-    assert abs(lengths[0] - 15) < 1.5 and abs(lengths[1] - 6) < 1.5, lengths
+    obs.clock.t += 30
+    out = client.post("/api/record/stop").json()
+    assert out["duration"] == 30 and ("close",) in player.calls
+    final = wait_rename(rec, s["id"])
+    assert Path(final).name == "진격의 거인 3화 - 스트리밍.mkv" and Path(final).exists()
 
 
-def test_range_open_closed_on_stop(env):
-    rec, obs, client, _, _ = env
-    client.post("/api/record/start", json={})
-    obs.clock.t += 5
-    client.post("/api/mark", json={"kind": "in"})
-    assert client.post("/api/mark", json={"kind": "in"}).status_code == 409
-    obs.clock.t += 5
-    s = client.post("/api/record/stop").json()
-    assert s["markers"][0]["end"] == 10
-
-
-def test_mark_when_not_recording(env):
-    _, _, client, _, _ = env
-    assert client.post("/api/mark", json={"kind": "point"}).status_code == 409
-
-
-def test_obs_started_manually_creates_session(env):
-    rec, obs, client, _, _ = env
-    obs.start()
-    obs.clock.t += 4
-    assert client.post("/api/mark", json={"kind": "point"}).status_code == 200
-    assert rec.active_id
-
-
-def test_auto_stop(env):
-    rec, obs, client, _, _ = env
-    client.post("/api/record/start", json={"auto_stop_min": 1})
-    rec.auto_stop_at -= 61
+def test_stops_when_video_ends(env):
+    rec, obs, player, client, tmp = env
+    client.post("/api/record/start", json={"url": "https://ex.com/ep", "title": "3화"})
+    obs.clock.t += 10
+    rec.tick()
+    assert obs.recording
+    player.ended = True
     rec.tick()
     assert not obs.recording and rec.active_id is None
+    assert "끝나" in rec.events[0]["msg"] or any("끝나" in e["msg"] for e in rec.events)
 
 
-def test_schedule_fires_once(env):
-    rec, obs, client, opened, _ = env
-    r = client.post("/api/schedules", json={"name": "토요일", "time": "23:30", "weekdays": [5],
-                                            "duration_min": 25, "url": "https://x"})
-    assert r.status_code == 200, r.text
-    sat = datetime(2026, 10, 31, 23, 30, 30)  # 토요일
-    rec.tick(datetime(2026, 10, 31, 23, 29))
-    assert not obs.recording
-    rec.tick(sat)
-    assert obs.recording and opened == ["https://x"] and rec.auto_stop_at
-    obs.stop(); rec.active_id = None
-    rec.tick(sat)  # 같은 회차는 다시 실행되지 않음
-    assert not obs.recording
+def test_no_auto_stop_when_disabled_or_no_video(env):
+    rec, obs, player, client, _ = env
+    client.post("/api/record/start", json={"url": "https://ex.com", "stop_on_end": False})
+    player.ended = True
+    rec.tick()
+    assert obs.recording
+    client.post("/api/record/stop")
+
+    player.has_video = False
+    player.ended = False
+    r = client.post("/api/record/start", json={"url": "https://ex.com"}).json()
+    assert obs.recording and client.get("/api/status").json()["stop_on_end"] is False
 
 
-def test_schedule_validation_and_next_run(env):
-    _, _, client, _, _ = env
-    assert client.post("/api/schedules", json={"name": "x", "time": "25:00"}).status_code == 400
-    j = Job(id="a", name="x", time="09:00", weekdays=[0])
-    assert j.next_run(datetime(2026, 10, 31, 12)) == datetime(2026, 11, 2, 9, 0)
-    one = Job(id="b", name="y", time="09:00", date="2026-11-05")
-    assert one.next_run(datetime(2026, 10, 31)) == datetime(2026, 11, 5, 9)
+def test_pause_resume_and_seek(env):
+    rec, obs, player, client, _ = env
+    client.post("/api/record/start", json={"url": "https://ex.com"})
+    assert client.post("/api/record/pause").status_code == 200
+    assert obs.paused and player.paused
+    client.post("/api/record/resume")
+    assert not obs.paused and not player.paused
+    t = client.post("/api/player/seek", json={"delta": 10}).json()["time"]
+    assert t == 10
+    assert client.post("/api/player/seek", json={"to": "1:00"}).json()["time"] == 60
 
 
-def test_marker_window():
-    from recorder.sessions import Marker
-    assert Marker(id="a", kind="point", t=3).window(10, 5, 60) == (0, 8)
-    assert Marker(id="a", kind="point", t=58).window(10, 5, 60) == (48, 60)
-    assert Marker(id="a", kind="range", start=5, end=9).window(10, 5, 60) == (5, 9)
+def test_record_without_url(env):
+    rec, obs, player, client, _ = env
+    s = client.post("/api/record/start", json={}).json()
+    assert obs.recording and player.calls == [] and s["title"]
+    assert client.post("/api/record/start", json={}).status_code == 409
+
+
+def test_rename_after_recording(env):
+    rec, obs, player, client, tmp = env
+    rec.cfg.recording.rename_to_title = False
+    raw = tmp / "raw.mkv"
+    raw.write_bytes(b"x")
+    (tmp / "새 이름.mkv").write_bytes(b"other")  # 이름이 겹치면 (2)
+    obs.output_path = str(raw)
+    s = client.post("/api/record/start", json={}).json()
+    client.post("/api/record/stop")
+    r = client.patch(f"/api/recordings/{s['id']}", json={"title": "새 이름"}).json()
+    assert Path(r["output_path"]).name == "새 이름 (2).mkv" and not raw.exists()
+    r = client.patch(f"/api/recordings/{s['id']}", json={"title": 'a/b:c?'}).json()
+    assert Path(r["output_path"]).name == "a_b_c_.mkv"
+    lst = client.get("/api/recordings").json()
+    assert lst[0]["title"] == "a/b:c?"
+    assert client.patch(f"/api/recordings/{s['id']}", json={"title": " "}).status_code == 400
+
+
+def test_rename_while_recording_applies_at_stop(env):
+    rec, obs, player, client, tmp = env
+    raw = tmp / "raw.mkv"
+    raw.write_bytes(b"x")
+    obs.output_path = str(raw)
+    s = client.post("/api/record/start", json={}).json()
+    client.patch(f"/api/recordings/{s['id']}", json={"title": "도중에 바꾼 이름"})
+    client.post("/api/record/stop")
+    assert Path(wait_rename(rec, s["id"])).name == "도중에 바꾼 이름.mkv"
+
+
+def test_helpers():
+    assert parse_time("12:34") == 754 and parse_time("1:02:03") == 3723 and parse_time("") is None
+    with pytest.raises(ValueError):
+        parse_time("abc")
+    assert safe_filename('  제목: "1화" ') == "제목_ _1화_"
 
 
 def test_pairing_flow(env):
-    rec, _, client, _, tmp = env
+    rec, *_ = env
     from recorder.pairing import Pairing
-    anon = TestClient(client.app)
-    info = anon.get("/api/info").json()
-    assert info["app"] == "anime-recorder" and info["id"]
-
-    # 앱 생성 시 만든 Pairing의 PIN을 가로채기 위해 새 앱을 만든다
     pins = []
     pairing = Pairing(rec.cfg.data_dir)
     pairing.on_pin = lambda d, p: pins.append(p)
-    app_client = TestClient(create_app(rec, background=False, pairing=pairing))
-    pid = app_client.post("/api/pair/start", json={"device": "Galaxy"}).json()["pair_id"]
+    c = TestClient(create_app(rec, background=False, pairing=pairing))
+    assert c.get("/api/info").json()["app"] == "anime-recorder"
+    pid = c.post("/api/pair/start", json={"device": "Galaxy"}).json()["pair_id"]
     bad = "0000" if pins[0] != "0000" else "1111"
-    r = app_client.post("/api/pair/confirm", json={"pair_id": pid, "pin": bad})
+    r = c.post("/api/pair/confirm", json={"pair_id": pid, "pin": bad})
     assert r.status_code == 403 and "남음" in r.json()["detail"]
-    r = app_client.post("/api/pair/confirm", json={"pair_id": pid, "pin": pins[0]})
-    assert r.status_code == 200
-    tok = r.json()["token"]
-    assert app_client.get("/api/status", headers={"Authorization": f"Bearer {tok}"}).status_code == 200
-    # 한 번 쓴 요청은 재사용 불가
-    assert app_client.post("/api/pair/confirm", json={"pair_id": pid, "pin": pins[0]}).status_code == 403
-    devs = app_client.get("/api/devices", headers={"Authorization": f"Bearer {tok}"}).json()
-    assert devs[0]["name"] == "Galaxy" and "hash" not in devs[0]
+    tok = c.post("/api/pair/confirm", json={"pair_id": pid, "pin": pins[0]}).json()["token"]
+    assert c.get("/api/status", headers={"Authorization": f"Bearer {tok}"}).status_code == 200
+    assert c.post("/api/pair/confirm", json={"pair_id": pid, "pin": pins[0]}).status_code == 403
 
 
 def test_pairing_lockout(tmp_path):
@@ -187,17 +189,15 @@ def test_pairing_lockout(tmp_path):
 
 
 def test_discovery_responds(tmp_path):
-    import json, socket, threading
+    import json, socket, threading, time
     from recorder.pairing import DISCOVERY_MAGIC, HostInfo, serve_discovery
     info = HostInfo(tmp_path, "집PC", 8765)
     stop = threading.Event()
-    port = 18766
-    t = threading.Thread(target=serve_discovery, args=(info, stop, port), daemon=True)
-    t.start()
-    import time; time.sleep(0.3)
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2)
-    s.sendto(DISCOVERY_MAGIC, ("127.0.0.1", port))
-    data, _ = s.recvfrom(4096)
+    threading.Thread(target=serve_discovery, args=(info, stop, 18766), daemon=True).start()
+    time.sleep(0.3)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(2)
+    s.sendto(DISCOVERY_MAGIC, ("127.0.0.1", 18766))
+    d = json.loads(s.recvfrom(4096)[0])
     stop.set()
-    d = json.loads(data)
-    assert d["name"] == "집PC" and d["port"] == 8765 and d["id"] == info.id
+    assert d["name"] == "집PC" and d["id"] == info.id

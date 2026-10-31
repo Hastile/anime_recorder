@@ -7,6 +7,8 @@ from recorder.core import Recorder
 from recorder.isolation import BrowserWindow, build_browser_cmd, check_obs_setup, obs_window_string
 from recorder.obs import FakeObs
 
+from recorder.demo import FakePlayer
+
 
 class FakeWindows:
     """Win32 창 제어 흉내."""
@@ -58,12 +60,13 @@ def env(tmp_path):
     old = BrowserWindow(50, 1, "이전 녹화 창", "Chrome_WidgetWin_1", "chrome.exe")
     win.windows.append(old)
 
-    def opener(cfg, url):
+    def on_open(url):
         # 브라우저가 열리면 새 창이 생기고 포커스를 가져감
         win.windows.append(BrowserWindow(200, 2, "3화 - 스트리밍", "Chrome_WidgetWin_1", "chrome.exe"))
         win.fg = 200
 
-    rec = Recorder(cfg, obs, opener=opener, sleep=lambda s: None, windows=win, pid_finder=lambda: {1, 2})
+    rec = Recorder(cfg, obs, player=FakePlayer(on_open=on_open), sleep=lambda s: None,
+                   windows=win, pid_finder=lambda: {1, 2})
     return rec, obs, win
 
 
@@ -85,11 +88,11 @@ def test_minimized_window_is_restored_behind(env):
     assert ("restore", 200) in win.calls and obs.recording
 
 
-def test_window_closed_on_stop(env):
+def test_browser_closed_on_stop(env):
     rec, obs, win = env
     rec.start(url="https://x")
     rec.stop()
-    assert ("close", 200) in win.calls and rec.browser is None
+    assert ("close",) in rec.player.calls and rec.browser is None
     assert win.exists(50)  # 다른 창은 건드리지 않음
 
 

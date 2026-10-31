@@ -32,41 +32,29 @@ class ObsConfig:
 
 @dataclass
 class BrowserConfig:
-    # 녹화 전용 브라우저(별도 프로필, 독립 창)로 연다. 평소 쓰는 브라우저와 섞이지 않는다.
-    isolated: bool = True
-    # 비우면 크롬 → 엣지 순서로 자동으로 찾는다
+    # 비우면 크롬 → 엣지 순서로 자동으로 찾는다.
+    # 평소 크롬을 쓰면 녹화는 엣지로 하는 것이 가장 확실하다 (OBS가 창을 헷갈리지 않음).
     executable: str = ""
-    # 주소창/탭 없는 깔끔한 창
-    app_mode: bool = True
     window_size: list[int] = field(default_factory=lambda: [1920, 1080])
     # 예: 보조 모니터에 띄우려면 [1920, 0]
     window_position: list[int] = field(default_factory=list)
+    # 영상을 창에 꽉 채우기 (사이트 헤더/댓글 없이 영상만 녹화)
+    fill_video: bool = True
+    # 페이지에서 영상을 찾을 때까지 기다리는 최대 시간(초)
+    video_timeout: float = 20.0
     # 창을 띄운 뒤 맨 뒤로 보내고 하던 창으로 포커스를 돌려줌
     send_to_back: bool = True
-    # 녹화가 끝나면 녹화용 창을 닫음 (다음 화 자동재생 방지)
+    # 녹화가 끝나면 녹화용 창 닫기 (다음 화 자동재생 방지)
     close_on_stop: bool = True
     extra_args: list[str] = field(default_factory=list)
-    # isolated=false일 때만 사용. 비어 있으면 기본 브라우저. "{url}" 자리에 주소가 들어간다.
-    command: list[str] = field(default_factory=list)
-    # 페이지를 연 뒤 녹화를 시작하기까지 기다리는 시간(초)
+    # 창이 뜨기를 기다리는 시간(초)
     wait_seconds: float = 5.0
 
 
 @dataclass
-class ClipConfig:
-    ffmpeg: str = "ffmpeg"
-    # "지금 표시" 마커 기준 앞/뒤로 잘라낼 길이(초)
-    pre_seconds: float = 10.0
-    post_seconds: float = 5.0
-    # False면 재인코딩 없이 자름(빠르고 무손실, 키프레임 단위로 잘림)
-    reencode: bool = False
-    # 녹화가 끝나면 마커 구간을 자동으로 잘라 저장
-    auto_export: bool = True
-    # 비어 있으면 <녹화 파일 폴더>/clips
-    output_dir: str = ""
-    quick_labels: list[str] = field(
-        default_factory=lambda: ["명장면", "웃김", "액션", "대사", "OP/ED"]
-    )
+class RecordingConfig:
+    # 녹화가 끝나면 파일 이름을 제목으로 바꿈 (예: "진격의 거인 3화.mkv")
+    rename_to_title: bool = True
 
 
 @dataclass
@@ -74,7 +62,7 @@ class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     obs: ObsConfig = field(default_factory=ObsConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
-    clips: ClipConfig = field(default_factory=ClipConfig)
+    recording: RecordingConfig = field(default_factory=RecordingConfig)
     data_dir: Path = Path("data")
 
 
@@ -93,7 +81,7 @@ def load_config(path: str | Path | None = "config.toml") -> Config:
         _fill(cfg.server, raw.get("server", {}))
         _fill(cfg.obs, raw.get("obs", {}))
         _fill(cfg.browser, raw.get("browser", {}))
-        _fill(cfg.clips, raw.get("clips", {}))
+        _fill(cfg.recording, raw.get("recording", {}))
         if "data_dir" in raw.get("storage", {}):
             cfg.data_dir = Path(raw["storage"]["data_dir"])
 

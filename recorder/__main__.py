@@ -33,7 +33,12 @@ def main() -> None:
     cfg = load_config(args.config)
     obs = FakeObs() if args.demo else ObsController(
         cfg.obs.host, cfg.obs.port, cfg.obs.password, cfg.obs.timeout)
-    app = create_app(Recorder(cfg, obs))
+    player = None
+    if args.demo:
+        from .demo import FakePlayer
+
+        player = FakePlayer()
+    app = create_app(Recorder(cfg, obs, player=player))
 
     print("\n" + "=" * 56)
     print(" Anime Recorder 실행 중" + (" (데모 모드)" if args.demo else ""))

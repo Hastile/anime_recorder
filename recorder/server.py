@@ -7,15 +7,14 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from .core import Recorder, RecorderError
+from .core import Recorder, RecorderError, parse_time
 from .obs import ObsError
 from .pairing import HostInfo, Pairing, serve_discovery
 
@@ -25,26 +24,17 @@ STATIC = Path(__file__).parent / "static"
 class StartReq(BaseModel):
     url: str = ""
     title: str = ""
-    auto_stop_min: float | None = Field(default=None, gt=0, le=24 * 60)
+    start_at: str | float | None = None  # "12:34" 또는 초
+    stop_on_end: bool = True
 
 
-class MarkReq(BaseModel):
-    kind: str = "point"
-    label: str = ""
+class SeekReq(BaseModel):
+    delta: float | None = None
+    to: str | float | None = None
 
 
-class LabelReq(BaseModel):
-    label: str
-
-
-class JobReq(BaseModel):
-    name: str
-    time: str
-    duration_min: int = 30
-    url: str = ""
-    weekdays: list[int] = []
-    date: str | None = None
-    enabled: bool = True
+class RenameReq(BaseModel):
+    title: str
 
 
 class PairStartReq(BaseModel):
@@ -54,16 +44,6 @@ class PairStartReq(BaseModel):
 class PairConfirmReq(BaseModel):
     pair_id: str
     pin: str
-
-
-class JobPatch(BaseModel):
-    name: str | None = None
-    time: str | None = None
-    duration_min: int | None = None
-    url: str | None = None
-    weekdays: list[int] | None = None
-    date: str | None = None
-    enabled: bool | None = None
 
 
 def show_pin(device: str, pin: str) -> None:
@@ -161,7 +141,8 @@ def create_app(rec: Recorder, *, background: bool = True, pairing: Pairing | Non
 
     @app.post("/api/record/start", dependencies=dep)
     def start(req: StartReq):
-        return asdict(rec.start(req.url.strip(), req.title.strip(), req.auto_stop_min))
+        s = rec.start(req.url.strip(), req.title.strip(), parse_time(req.start_at), req.stop_on_end)
+        return asdict(s)
 
     @app.post("/api/record/stop", dependencies=dep)
     def stop():
@@ -178,9 +159,9 @@ def create_app(rec: Recorder, *, background: bool = True, pairing: Pairing | Non
         rec.resume()
         return {"ok": True}
 
-    @app.post("/api/mark", dependencies=dep)
-    def mark(req: MarkReq):
-        return rec.mark(req.kind, req.label.strip())
+    @app.post("/api/player/seek", dependencies=dep)
+    def seek(req: SeekReq):
+        return {"time": rec.seek(delta=req.delta, to=parse_time(req.to))}
 
     @app.get("/api/preview", dependencies=dep)
     def preview(width: int = 640):
@@ -192,65 +173,19 @@ def create_app(rec: Recorder, *, background: bool = True, pairing: Pairing | Non
             return Response(status_code=204)
         return Response(img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
-    @app.get("/api/sessions", dependencies=dep)
-    def sessions():
+    @app.get("/api/recordings", dependencies=dep)
+    def recordings():
         return [asdict(s) for s in rec.sessions.list()]
 
-    @app.get("/api/sessions/{sid}", dependencies=dep)
-    def session(sid: str):
-        return asdict(rec.sessions.get(sid))
+    @app.patch("/api/recordings/{sid}", dependencies=dep)
+    def rename(sid: str, req: RenameReq):
+        return asdict(rec.rename(sid, req.title))
 
-    @app.delete("/api/sessions/{sid}", dependencies=dep)
-    def delete_session(sid: str):
+    @app.delete("/api/recordings/{sid}", dependencies=dep)
+    def delete_recording(sid: str):
         if sid == rec.active_id:
-            raise RecorderError("녹화 중인 세션은 지울 수 없습니다")
+            raise RecorderError("녹화 중인 항목은 지울 수 없습니다")
         rec.sessions.delete(sid)  # 녹화 파일 자체는 지우지 않는다
-        return {"ok": True}
-
-    @app.post("/api/sessions/{sid}/export", dependencies=dep)
-    def export(sid: str):
-        rec.export_async(sid)
-        return {"ok": True}
-
-    @app.patch("/api/sessions/{sid}/markers/{mid}", dependencies=dep)
-    def edit_marker(sid: str, mid: str, req: LabelReq):
-        rec.edit_marker(sid, mid, req.label.strip())
-        return {"ok": True}
-
-    @app.delete("/api/sessions/{sid}/markers/{mid}", dependencies=dep)
-    def delete_marker(sid: str, mid: str):
-        rec.delete_marker(sid, mid)
-        return {"ok": True}
-
-    @app.get("/api/recent-urls", dependencies=dep)
-    def recent_urls():
-        seen: dict[str, str] = {}
-        for s in rec.sessions.list(100):
-            if s.url and s.url not in seen:
-                seen[s.url] = s.title
-        return [{"url": u, "title": t} for u, t in list(seen.items())[:10]]
-
-    def _job_dict(j):
-        d = asdict(j)
-        nxt = j.next_run(datetime.now())
-        d["next_run"] = nxt.isoformat(timespec="minutes") if nxt else None
-        return d
-
-    @app.get("/api/schedules", dependencies=dep)
-    def schedules():
-        return [_job_dict(j) for j in rec.schedules.jobs]
-
-    @app.post("/api/schedules", dependencies=dep)
-    def add_schedule(req: JobReq):
-        return _job_dict(rec.schedules.add(**req.model_dump()))
-
-    @app.patch("/api/schedules/{jid}", dependencies=dep)
-    def edit_schedule(jid: str, req: JobPatch):
-        return _job_dict(rec.schedules.update(jid, **req.model_dump(exclude_unset=True)))
-
-    @app.delete("/api/schedules/{jid}", dependencies=dep)
-    def delete_schedule(jid: str):
-        rec.schedules.remove(jid)
         return {"ok": True}
 
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")

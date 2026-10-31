@@ -24,6 +24,8 @@ import org.json.JSONObject
 class ControlActivity : ComponentActivity() {
     companion object {
         const val EXTRA_HOST = "host"
+        const val EXTRA_SHARE_URL = "share_url"
+        const val EXTRA_SHARE_TITLE = "share_title"
     }
 
     private lateinit var web: WebView
@@ -84,7 +86,13 @@ class ControlActivity : ComponentActivity() {
             }
             base = r.base
             HostStore(this@ControlActivity).lastHostId = host.id
-            web.loadUrl("${r.base}/#token=${Uri.encode(host.token)}")
+            val hash = StringBuilder("token=${Uri.encode(host.token)}")
+            intent.getStringExtra(EXTRA_SHARE_URL)?.let { hash.append("&share=${Uri.encode(it)}") }
+            intent.getStringExtra(EXTRA_SHARE_TITLE)?.takeIf { it.isNotBlank() }?.let { hash.append("&title=${Uri.encode(it)}") }
+            // 공유 주소는 한 번만 쓰고 지운다 (다시 연결할 때 또 채워지지 않게)
+            intent.removeExtra(EXTRA_SHARE_URL)
+            intent.removeExtra(EXTRA_SHARE_TITLE)
+            web.loadUrl("${r.base}/#$hash")
         }
     }
 
