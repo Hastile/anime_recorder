@@ -21,11 +21,28 @@ class ObsConfig:
     port: int = 4455
     password: str = ""
     timeout: float = 3.0
+    # 녹화 전용 브라우저 창을 자동으로 연결할 OBS 소스 이름 (비우면 건드리지 않음)
+    video_source: str = ""  # 윈도우 캡처
+    audio_source: str = ""  # 응용 프로그램 오디오 캡처
 
 
 @dataclass
 class BrowserConfig:
-    # 비어 있으면 기본 브라우저로 연다. "{url}" 자리에 주소가 들어간다.
+    # 녹화 전용 브라우저(별도 프로필, 독립 창)로 연다. 평소 쓰는 브라우저와 섞이지 않는다.
+    isolated: bool = True
+    # 비우면 크롬 → 엣지 순서로 자동으로 찾는다
+    executable: str = ""
+    # 주소창/탭 없는 깔끔한 창
+    app_mode: bool = True
+    window_size: list[int] = field(default_factory=lambda: [1920, 1080])
+    # 예: 보조 모니터에 띄우려면 [1920, 0]
+    window_position: list[int] = field(default_factory=list)
+    # 창을 띄운 뒤 맨 뒤로 보내고 하던 창으로 포커스를 돌려줌
+    send_to_back: bool = True
+    # 녹화가 끝나면 녹화용 창을 닫음 (다음 화 자동재생 방지)
+    close_on_stop: bool = True
+    extra_args: list[str] = field(default_factory=list)
+    # isolated=false일 때만 사용. 비어 있으면 기본 브라우저. "{url}" 자리에 주소가 들어간다.
     command: list[str] = field(default_factory=list)
     # 페이지를 연 뒤 녹화를 시작하기까지 기다리는 시간(초)
     wait_seconds: float = 5.0

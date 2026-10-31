@@ -179,7 +179,24 @@ function renderStatus() {
   } else {
     $("#live-markers").innerHTML = ""; $("#mark-count").textContent = "";
   }
+  renderIsolation(s);
   $("#events").innerHTML = s.events.map((e) => `<li class="${e.level}">${e.time} · ${esc(e.msg)}</li>`).join("");
+}
+
+function renderIsolation(s) {
+  const items = s.isolation || [];
+  const box = $("#iso");
+  box.classList.toggle("hidden", !items.length);
+  if (!items.length) return;
+  const warns = items.filter((i) => i.level === "warn").length;
+  box.classList.toggle("has-warn", warns > 0);
+  const sum = $("#iso-sum");
+  sum.textContent = warns ? `확인 필요 ${warns}개` : "모두 정상";
+  sum.className = warns ? "sum-warn" : "sum-ok";
+  const extra = s.browser_window ? [{ level: "ok", msg: `녹화 창: ${s.browser_window}` }] : [];
+  const html = [...extra, ...items].map((i) => `<li class="${i.level}">${esc(i.msg)}</li>`).join("");
+  if ($("#iso-list").dataset.v !== html) { $("#iso-list").innerHTML = html; $("#iso-list").dataset.v = html; }
+  if (warns && !box.dataset.autoOpened) { box.open = true; box.dataset.autoOpened = "1"; }
 }
 
 async function refresh() {

@@ -91,9 +91,25 @@ class ObsController:
         except ObsError:
             return None
 
-    def screenshot(self, width: int = 640) -> bytes | None:
+    def _scene_name(self) -> str:
         scene = self._call("get_current_program_scene")
-        name = getattr(scene, "scene_name", None) or scene.current_program_scene_name
+        return getattr(scene, "scene_name", None) or scene.current_program_scene_name
+
+    def scene_items(self) -> list[dict]:
+        return list(self._call("get_scene_item_list", self._scene_name()).scene_items)
+
+    def inputs(self) -> list[dict]:
+        return list(self._call("get_input_list").inputs)
+
+    def is_muted(self, name: str) -> bool:
+        return bool(self._call("get_input_mute", name).input_muted)
+
+    def set_window(self, input_name: str, window: str) -> None:
+        """윈도우 캡처 / 응용 프로그램 오디오 캡처 소스가 잡을 창을 지정."""
+        self._call("set_input_settings", input_name, {"window": window}, True)
+
+    def screenshot(self, width: int = 640) -> bytes | None:
+        name = self._scene_name()
         height = max(8, width * 9 // 16)
         r = self._call("get_source_screenshot", name, "jpg", width, height, 70)
         data = r.image_data
@@ -114,6 +130,11 @@ class FakeObs:
         self.record_dir = str(record_dir)
         self.output_path: str | None = None
         self.clock = time.monotonic
+        self.items = [{"sourceName": "브라우저", "inputKind": "window_capture", "sceneItemEnabled": True}]
+        self.input_list = [{"inputName": "브라우저", "inputKind": "window_capture"},
+                           {"inputName": "브라우저 소리", "inputKind": "wasapi_process_output_capture"}]
+        self.muted: dict[str, bool] = {}
+        self.windows: dict[str, str] = {}
 
     def _elapsed(self) -> float:
         if not self.recording:
@@ -151,6 +172,18 @@ class FakeObs:
 
     def record_directory(self) -> str | None:
         return self.record_dir
+
+    def scene_items(self) -> list[dict]:
+        return self.items
+
+    def inputs(self) -> list[dict]:
+        return self.input_list
+
+    def is_muted(self, name: str) -> bool:
+        return self.muted.get(name, False)
+
+    def set_window(self, input_name: str, window: str) -> None:
+        self.windows[input_name] = window
 
     def screenshot(self, width: int = 640) -> bytes | None:
         return None

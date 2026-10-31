@@ -1,5 +1,5 @@
 // 앱 껍데기만 캐시한다. API 응답은 항상 네트워크로.
-const CACHE = "recorder-v1";
+const CACHE = "recorder-v2";
 const SHELL = ["./", "index.html", "style.css", "app.js", "icon.svg", "manifest.webmanifest"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));

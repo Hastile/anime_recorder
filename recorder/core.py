@@ -14,6 +14,8 @@ from pathlib import Path
 
 from . import clips
 from .config import Config
+from .isolation import (GLOBAL_AUDIO_KINDS, BrowserWindow, WindowControl, build_browser_cmd,
+                        check_obs_setup, find_browser, popen_kwargs, profile_pids)
 from .obs import ObsError
 from .scheduler import ScheduleStore
 from .sessions import Session, SessionStore
@@ -28,7 +30,17 @@ class RecorderError(RuntimeError):
 
 
 def open_url(cfg: Config, url: str) -> None:
-    if cfg.browser.command:
+    b = cfg.browser
+    if b.isolated:
+        exe = find_browser(b.executable)
+        if not exe:
+            raise OSError("녹화용 브라우저(크롬/엣지)를 찾을 수 없습니다. config.toml의 browser.executable을 지정하세요")
+        subprocess.Popen(build_browser_cmd(
+            exe, cfg.data_dir / "browser-profile", url, app_mode=b.app_mode,
+            size=b.window_size or None, position=b.window_position or None, extra=b.extra_args),
+            **popen_kwargs())
+        return
+    if b.command:
         cmd = [part.replace("{url}", url) for part in cfg.browser.command]
         if not any("{url}" in p for p in cfg.browser.command):
             cmd.append(url)
@@ -38,9 +50,14 @@ def open_url(cfg: Config, url: str) -> None:
 
 
 class Recorder:
-    def __init__(self, cfg: Config, obs, *, opener=open_url, sleep=time.sleep):
+    def __init__(self, cfg: Config, obs, *, opener=open_url, sleep=time.sleep,
+                 windows: WindowControl | None = None, pid_finder=None):
         self.cfg = cfg
         self.obs = obs
+        self.win = windows or WindowControl()
+        self._pid_finder = pid_finder or (lambda: profile_pids(cfg.data_dir / "browser-profile"))
+        self.browser: BrowserWindow | None = None
+        self._isolation: tuple[float, list[dict]] = (0.0, [])
         self.sessions = SessionStore(cfg.data_dir / "sessions")
         self.schedules = ScheduleStore(cfg.data_dir / "schedules.json")
         self._opener = opener
@@ -81,6 +98,8 @@ class Recorder:
             "auto_stop_in": remaining,
             "disk": disk,
             "events": list(self.events)[:10],
+            "isolation": self.isolation() if st.connected else [],
+            "browser_window": self.browser.title if self.browser else None,
             "quick_labels": self.cfg.clips.quick_labels,
         }
 
@@ -92,11 +111,7 @@ class Recorder:
             self.starting = True
         try:
             if url:
-                try:
-                    self._opener(self.cfg, url)
-                except OSError as e:
-                    raise RecorderError(f"브라우저를 열 수 없습니다: {e}")
-                self._sleep(self.cfg.browser.wait_seconds)
+                self._open_isolated(url)
             try:
                 self.obs.start()
             except ObsError as e:
@@ -109,6 +124,103 @@ class Recorder:
             return s
         finally:
             self.starting = False
+
+    # ---- 녹화 전용 브라우저 ---------------------------------------------
+    def _browser_windows(self) -> list[BrowserWindow]:
+        if not self.cfg.browser.isolated:
+            return []
+        return self.win.find_windows(self._pid_finder())
+
+    def _open_isolated(self, url: str) -> None:
+        """브라우저를 열고, 새 창을 찾아 OBS 소스에 연결한 뒤 하던 작업으로 포커스를 돌려준다."""
+        b = self.cfg.browser
+        prev_focus = self.win.foreground()
+        before = {w.hwnd for w in self._browser_windows()}
+        try:
+            self._opener(self.cfg, url)
+        except OSError as e:
+            raise RecorderError(f"브라우저를 열 수 없습니다: {e}")
+
+        step, waited, found = 0.5, 0.0, None
+        while waited < b.wait_seconds:
+            self._sleep(step)
+            waited += step
+            if found is None:
+                new = [w for w in self._browser_windows() if w.hwnd not in before]
+                if new:
+                    found = new[0]
+                    # 창이 뜨자마자 뒤로 보내고 포커스 복구 (작업 중이던 창 방해 X)
+                    if b.send_to_back:
+                        self.win.send_to_back(found.hwnd)
+                        self.win.focus(prev_focus)
+        if found is None:
+            self.browser = None
+            if b.isolated and self.win.ok:
+                self.event("녹화 창을 찾지 못해 OBS 소스를 자동 연결하지 못했습니다", "error")
+            return
+        # 페이지가 로드된 뒤의 제목으로 다시 읽어서 연결
+        found = next((w for w in self._browser_windows() if w.hwnd == found.hwnd), found)
+        self.browser = found
+        self._bind_obs(found)
+
+    def _bind_obs(self, w: BrowserWindow) -> None:
+        for name in (self.cfg.obs.video_source, self.cfg.obs.audio_source):
+            if not name:
+                continue
+            try:
+                self.obs.set_window(name, w.obs_value)
+            except ObsError as e:
+                self.event(f"OBS 소스 '{name}' 연결 실패: {e}", "error")
+                continue
+        if self.cfg.obs.video_source or self.cfg.obs.audio_source:
+            self.event(f"녹화 창 연결: {w.title} ({w.exe})")
+        self._isolation = (0.0, [])
+
+    def _close_browser(self) -> None:
+        if self.browser and self.cfg.browser.close_on_stop:
+            self.win.close(self.browser.hwnd)
+        self.browser = None
+
+    def _guard_browser(self) -> None:
+        """녹화 중 창이 최소화되면 캡처가 멈추므로 맨 뒤에서 다시 복원한다."""
+        w = self.browser
+        if not w:
+            return
+        if not self.win.exists(w.hwnd):
+            self.browser = None
+            self.event("녹화 창이 닫혔습니다", "error")
+        elif self.win.is_minimized(w.hwnd):
+            self.win.restore_behind(w.hwnd)
+            self.event("녹화 창이 최소화되어 맨 뒤에 다시 띄웠습니다")
+
+    # ---- 격리 점검 ---------------------------------------------------
+    def isolation(self, max_age: float = 10.0) -> list[dict]:
+        ts, cached = self._isolation
+        if time.monotonic() - ts < max_age and cached:
+            return cached
+        try:
+            inputs = self.obs.inputs()
+            muted = {i["inputName"]: self.obs.is_muted(i["inputName"])
+                     for i in inputs if i.get("inputKind") in GLOBAL_AUDIO_KINDS}
+            report = check_obs_setup(self.obs.scene_items(), inputs, muted,
+                                     self.cfg.obs.video_source, self.cfg.obs.audio_source)
+        except ObsError as e:
+            return [{"level": "warn", "msg": f"OBS 설정을 읽지 못했습니다: {e}"}]
+        b = self.cfg.browser
+        if b.isolated:
+            exe = find_browser(b.executable)
+            if exe:
+                report.append({"level": "ok", "msg": f"녹화 전용 브라우저: {Path(exe).name} (별도 프로필)"})
+            else:
+                report.append({"level": "warn", "msg": "녹화용 브라우저(크롬/엣지)를 찾을 수 없습니다"})
+            if not (self.cfg.obs.video_source or self.cfg.obs.audio_source):
+                report.append({"level": "warn", "msg": "OBS 소스 자동 연결이 꺼져 있습니다 "
+                               "(config.toml의 obs.video_source / audio_source)"})
+        else:
+            report.append({"level": "warn", "msg": "평소 브라우저로 열고 있어 다른 탭/소리가 섞일 수 있습니다 "
+                           "(browser.isolated = true 권장)"})
+        self._isolation = (time.monotonic(), report)
+        return report
 
     def stop(self) -> Session | None:
         st = self.obs.status()
@@ -150,6 +262,7 @@ class Recorder:
             return None
         s = self.sessions.get(self.active_id)
         self.active_id, self.auto_stop_at = None, None
+        self._close_browser()
         s.ended_at = datetime.now().isoformat(timespec="seconds")
         s.output_path = output_path or self._guess_latest_recording(s)
         s.duration = duration
@@ -262,6 +375,7 @@ class Recorder:
         # OBS에서 직접 멈춘 경우 감지
         if self.active_id:
             self.status()
+            self._guard_browser()
 
     def run_loop(self, stop_event: threading.Event, interval: float = 5.0) -> None:
         while not stop_event.wait(interval):

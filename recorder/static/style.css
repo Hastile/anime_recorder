@@ -81,3 +81,15 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
   background: #2b3040; padding: 10px 16px; border-radius: 12px; opacity: 0; transition: .2s; pointer-events: none; max-width: 90vw; z-index: 10; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
 .toast.error { background: #5a1f27; }
+
+.iso summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; }
+.iso summary::-webkit-details-marker { display: none; }
+.iso summary::after { content: "▾"; margin-left: auto; color: var(--muted); }
+.iso[open] summary::after { content: "▴"; }
+.iso ul { list-style: none; margin: 8px 0 0; padding: 0; font-size: 14px; }
+.iso li { display: flex; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.iso li::before { content: "✓"; color: var(--green); font-weight: 700; }
+.iso li.warn::before { content: "!"; color: var(--gold); width: .7em; text-align: center; }
+.iso.has-warn { border-color: #6b5420; }
+.small-text { font-size: 13px; margin: 8px 0 0; }
+.sum-ok { color: var(--green); } .sum-warn { color: var(--gold); }

@@ -11,11 +11,29 @@ token = ""
 host = "127.0.0.1"
 port = 4455
 password = ""
+# 녹화 전용 브라우저 창을 자동으로 연결할 OBS 소스 이름 (OBS에 보이는 이름 그대로)
+video_source = "녹화 창"        # 윈도우 캡처
+audio_source = "녹화 창 소리"   # 응용 프로그램 오디오 캡처
 
 [browser]
-# 비우면 기본 브라우저로 엽니다. "{url}" 자리에 주소가 들어갑니다.
-# 예) 크롬 전체화면:
-# command = ["C:/Program Files/Google/Chrome/Application/chrome.exe", "--new-window", "--start-fullscreen", "{url}"]
+# 녹화 전용 브라우저: 별도 프로필의 독립된 창으로 열어서 평소 쓰는 브라우저와 섞이지 않게 합니다.
+isolated = true
+# 비우면 크롬 → 엣지 순서로 자동 탐색.
+# 평소 크롬을 쓴다면 녹화는 엣지로 하는 것이 가장 확실합니다 (실행 파일이 달라서 OBS가 헷갈릴 일이 없음).
+# executable = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+executable = ""
+# 주소창/탭 없는 창 (캡처 화면이 깔끔)
+app_mode = true
+window_size = [1920, 1080]
+# 보조 모니터가 있다면 그쪽에 띄우세요. 예: [1920, 0]
+window_position = []
+# 창을 띄운 뒤 맨 뒤로 보내고, 작업하던 창으로 포커스를 돌려줍니다
+send_to_back = true
+# 녹화가 끝나면 녹화용 창 닫기 (다음 화 자동재생 방지)
+close_on_stop = true
+extra_args = []
+
+# isolated = false 일 때만 사용. 비우면 기본 브라우저.
 command = []
 # 페이지를 연 뒤 녹화 시작까지 기다리는 시간(초)
 wait_seconds = 5
