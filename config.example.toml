@@ -1,0 +1,38 @@
+# 이 파일을 config.toml로 복사해서 수정하세요.
+
+[server]
+host = "0.0.0.0"
+port = 8765
+# 비워 두면 처음 실행할 때 자동으로 만들어 data/token.txt에 저장합니다.
+token = ""
+
+[obs]
+# OBS > 도구 > WebSocket 서버 설정 에서 확인
+host = "127.0.0.1"
+port = 4455
+password = ""
+
+[browser]
+# 비우면 기본 브라우저로 엽니다. "{url}" 자리에 주소가 들어갑니다.
+# 예) 크롬 전체화면:
+# command = ["C:/Program Files/Google/Chrome/Application/chrome.exe", "--new-window", "--start-fullscreen", "{url}"]
+command = []
+# 페이지를 연 뒤 녹화 시작까지 기다리는 시간(초)
+wait_seconds = 5
+
+[clips]
+# ffmpeg.exe 경로 (PATH에 있으면 그대로)
+ffmpeg = "ffmpeg"
+# "지금 표시" 기준 앞/뒤 몇 초를 자를지
+pre_seconds = 10
+post_seconds = 5
+# false: 무손실 고속 자르기(키프레임 단위)  /  true: 재인코딩(프레임 단위로 정확, 느림)
+reencode = false
+# 녹화가 끝나면 표시한 장면을 자동으로 잘라 저장
+auto_export = true
+# 비우면 <녹화 폴더>/clips
+output_dir = ""
+quick_labels = ["명장면", "웃김", "액션", "대사", "OP/ED"]
+
+[storage]
+data_dir = "data"
