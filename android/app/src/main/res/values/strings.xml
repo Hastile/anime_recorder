@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">Anime Recorder</string>
     <string name="channel_name">녹화 리모컨</string>
+    <string name="link_service_label">Anime Recorder 연동</string>
+    <string name="link_service_description">폰 브라우저를 볼 때 화면 위에 녹화 버튼을 띄우고, 버튼을 누르면 지금 보고 있는 페이지 주소를 읽어 내 PC에서 같은 페이지를 녹화합니다. 주소창의 주소만 읽으며, 버튼을 누를 때만 사용자의 PC로 보냅니다.</string>
+    <string name="media_watcher_label">Anime Recorder 재생 위치 연동</string>
 </resources>

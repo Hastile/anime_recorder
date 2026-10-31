@@ -68,6 +68,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import android.provider.Settings
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -181,6 +183,7 @@ private fun HostListScreen() {
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            item { LinkSetupCard() }
             item { SectionTitle("내 PC") }
             if (hosts.isEmpty()) {
                 item { Hint("아직 연결된 PC가 없습니다.\n아래에서 찾은 PC를 누르거나 'PC 추가'를 누르세요.") }
@@ -236,6 +239,57 @@ private fun HostListScreen() {
             onSave = { store.save(it); Remote.invalidate(it.id); menuFor = null; refresh() },
             onDelete = { store.remove(h.id); menuFor = null; refresh() },
         )
+    }
+}
+
+/** 브라우저 연동(플로팅 버튼) 권한 안내 */
+@Composable
+private fun LinkSetupCard() {
+    val ctx = LocalContext.current
+    var linkOn by remember { mutableStateOf(LinkService.isEnabled(ctx)) }
+    var mediaOn by remember { mutableStateOf(MediaLink.isEnabled(ctx)) }
+    LifecycleResumeEffect(Unit) {
+        linkOn = LinkService.isEnabled(ctx)
+        mediaOn = MediaLink.isEnabled(ctx)
+        onPauseOrDispose { }
+    }
+    fun open(action: String) {
+        runCatching { ctx.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = if (linkOn && mediaOn) CardBg else Color(0xFF1D2A3D)),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("브라우저 연동", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            if (linkOn && mediaOn) {
+                Text("✓ 준비 완료. 폰 브라우저에서 영상을 보다가 화면 위 ● REC 버튼을 누르면 PC가 같은 페이지를 같은 위치부터 녹화합니다.",
+                    color = Muted, fontSize = 14.sp)
+                return@Column
+            }
+            Text("폰 브라우저로 보다가 화면 위 ● 버튼만 누르면, PC가 같은 페이지를 같은 위치부터 녹화하고 일시정지·이동도 따라갑니다.",
+                color = Muted, fontSize = 14.sp)
+            PermissionRow("① 플로팅 버튼 + 주소 읽기", "접근성 → 설치된 앱 → Anime Recorder 연동", linkOn) {
+                open(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            }
+            PermissionRow("② 재생 위치·일시정지 연동", "알림 접근 → Anime Recorder", mediaOn) {
+                open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            }
+            Text("설정이 회색으로 막혀 있으면: 설정 → 애플리케이션 → Anime Recorder → 오른쪽 위 ⋮ → '제한된 설정 허용' 후 다시 켜세요.",
+                color = Muted, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun PermissionRow(title: String, where: String, on: Boolean, onOpen: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(if (on) "켜짐" else where, color = if (on) Green else Muted, fontSize = 12.sp)
+        }
+        if (!on) FilledTonalButton(onClick = onOpen) { Text("켜기") }
     }
 }
 
