@@ -20,6 +20,29 @@
 
 ---
 
+## 📱 안드로이드 앱 (추천)
+
+Artemis처럼 **PC 목록에서 고르면 바로 연결되는 전용 앱**입니다.
+
+**설치**: 폰에서 [Releases의 "Android 앱 (최신 빌드)"](https://github.com/Hastile/anime_recorder/releases/tag/android-latest)를 열고 `AnimeRecorder.apk`를 받아 설치합니다.
+("출처를 알 수 없는 앱 설치"를 허용하라고 나오면 허용하세요. 새 빌드는 기존 앱 위에 그대로 업데이트됩니다.)
+
+**처음 연결 (집에서 한 번)**
+1. PC에서 `start.bat`을 실행해 둡니다. (Windows 방화벽 창이 뜨면 **개인 네트워크 허용**)
+2. 앱을 열면 "같은 와이파이에서 찾은 PC"에 PC가 나타납니다 → **연결**
+3. PC 화면에 뜬 **4자리 PIN**을 앱에 입력하면 끝.
+   이때 PC의 Tailscale 주소도 자동으로 저장되므로, **밖에서는 폰의 Tailscale만 켜면 그대로 연결됩니다.**
+
+**쓰는 법**
+- PC 카드를 누르면 녹화 화면이 열립니다 (초록 점: 같은 와이파이 / 외부(Tailscale) 표시).
+- 녹화가 시작되면 **알림에 리모컨**이 생깁니다: `★ 표시` · `구간 시작/끝` · `■ 정지`(실수 방지: 두 번 눌러야 정지).
+  폰으로 다른 앱에서 영상을 보면서도, 잠금화면에서도 누를 수 있어요.
+- **빠른 설정 타일**: 상단바를 내리고 연필(편집) → `★ 장면 표시` 타일을 추가하면, 탭 한 번으로 표시됩니다.
+- PC 카드를 길게 누르면 이름 변경, 주소 추가, 삭제.
+
+> 자동 검색이 안 되면 `PC 추가`에서 PC의 IP(예: `192.168.0.10`)를 직접 넣으세요.
+> 앱을 직접 빌드하려면 `android/` 폴더를 Android Studio로 열면 됩니다.
+
 ## 1. PC 설정 (Windows, 한 번만)
 
 1. **Python 3.11 이상**을 설치합니다 (설치할 때 "Add to PATH"에 체크).
@@ -123,4 +146,6 @@ python -m pytest
 - `recorder/obs.py`: OBS WebSocket v5 제어
 - `recorder/isolation.py`: 녹화 전용 브라우저, 창 제어(Win32), OBS 격리 점검
 - `recorder/clips.py`: ffmpeg 자르기
-- `recorder/static/`: 폰 앱 (HTML/JS, PWA)
+- `recorder/pairing.py`: 앱 연결 (PC 정보, LAN 자동 검색, PIN 페어링)
+- `recorder/static/`: 리모컨 웹 화면 (안드로이드 앱 안에서도 이 화면을 씀)
+- `android/`: 안드로이드 앱 (Kotlin, Jetpack Compose). `.github/workflows/android.yml`이 APK를 빌드해 Releases에 올림

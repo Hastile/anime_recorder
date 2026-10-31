@@ -5,6 +5,10 @@ host = "0.0.0.0"
 port = 8765
 # 비워 두면 처음 실행할 때 자동으로 만들어 data/token.txt에 저장합니다.
 token = ""
+# 앱의 PC 목록에 보일 이름 (비우면 컴퓨터 이름)
+name = ""
+# 같은 와이파이에서 앱이 PC를 자동으로 찾게 함 (UDP 8766)
+discovery = true
 
 [obs]
 # OBS > 도구 > WebSocket 서버 설정 에서 확인
