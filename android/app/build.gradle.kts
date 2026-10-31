@@ -48,6 +48,22 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    // full: 브라우저 연동(플로팅 버튼) 포함. 접근성/알림 접근 권한 → PC에서 adb로 설치
+    // lite: 연동 제외. 폰에서 바로 받아 설치 가능 (공유하기 / 리모컨 / 알림)
+    flavorDimensions += "edition"
+    productFlavors {
+        create("full") {
+            dimension = "edition"
+            buildConfigField("boolean", "LINK", "true")
+        }
+        create("lite") {
+            dimension = "edition"
+            versionNameSuffix = "-lite"
+            buildConfigField("boolean", "LINK", "false")
+        }
     }
 }
 

@@ -183,7 +183,7 @@ private fun HostListScreen() {
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item { LinkSetupCard() }
+            if (BuildConfig.LINK) item { LinkSetupCard() }
             item { SectionTitle("내 PC") }
             if (hosts.isEmpty()) {
                 item { Hint("아직 연결된 PC가 없습니다.\n아래에서 찾은 PC를 누르거나 'PC 추가'를 누르세요.") }

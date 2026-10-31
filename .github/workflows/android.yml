@@ -63,15 +63,19 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease
+          ./gradlew --no-daemon assembleFullRelease assembleLiteRelease
 
-      - name: Collect APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk AnimeRecorder.apk
+      - name: Collect APKs
+        run: |
+          cp android/app/build/outputs/apk/full/release/app-full-release.apk AnimeRecorder.apk
+          cp android/app/build/outputs/apk/lite/release/app-lite-release.apk AnimeRecorder-lite.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: AnimeRecorder-apk
-          path: AnimeRecorder.apk
+          path: |
+            AnimeRecorder.apk
+            AnimeRecorder-lite.apk
 
       # 폰에서 바로 받을 수 있게 Releases의 "android-latest"에 항상 최신 APK를 올린다
       - name: Publish to Releases
@@ -81,10 +85,12 @@ jobs:
           TAG=android-latest
           NOTES="브랜치 ${GITHUB_REF_NAME} · 커밋 ${GITHUB_SHA::7} · 빌드 #${GITHUB_RUN_NUMBER}
 
-          폰에서 AnimeRecorder.apk를 받아 설치하세요. 새 빌드는 기존 앱 위에 그대로 업데이트됩니다."
+          - AnimeRecorder.apk: 브라우저 연동(플로팅 버튼) 포함. 폰에서 받으면 Play 프로텍트가 막으므로 PC에서 install_android_app.bat으로 설치하세요.
+          - AnimeRecorder-lite.apk: 연동 제외(공유하기/리모컨/알림). 폰에서 바로 받아 설치할 수 있습니다.
+          두 버전은 같은 앱이라 서로 덮어 설치됩니다."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes "$NOTES"
           else
             gh release create "$TAG" --prerelease --target "$GITHUB_SHA" --title "Android 앱 (최신 빌드)" --notes "$NOTES"
           fi
-          gh release upload "$TAG" AnimeRecorder.apk --clobber
+          gh release upload "$TAG" AnimeRecorder.apk AnimeRecorder-lite.apk --clobber
